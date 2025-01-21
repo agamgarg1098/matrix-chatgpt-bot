@@ -1,6 +1,4 @@
-import { OpenAI } from 'openai';
-import Keyv from 'keyv';
-import { KeyvFile } from 'keyv-file';
+import { OpenAI } from "openai";
 import {
   MatrixAuth, MatrixClient, AutojoinRoomsMixin, LogService, LogLevel, RichConsoleLogger,
   RustSdkCryptoStorageProvider, IStorageProvider, SimpleFsStorageProvider, ICryptoStorageProvider,
@@ -21,48 +19,72 @@ import { parseMatrixUsernamePretty, wrapPrompt } from './utils.js';
 LogService.setLogger(new RichConsoleLogger());
 LogService.setLevel(LogLevel.INFO);
 
-let storage: IStorageProvider;
-if (KEYV_BOT_STORAGE) {
-  storage = new KeyvStorageProvider('chatgpt-bot-storage');
-} else {
-  storage = new SimpleFsStorageProvider(path.join(DATA_PATH, "bot.json"));
-}
-
-let cryptoStore: ICryptoStorageProvider;
-if (MATRIX_ENCRYPTION) cryptoStore = new RustSdkCryptoStorageProvider(path.join(DATA_PATH, "encrypted"));
-
-let cacheOptions;
-if (KEYV_BACKEND === 'file') {
-  cacheOptions = { store: new KeyvFile({ filename: path.join(DATA_PATH, `chatgpt-bot-api.json`) }) };
-} else {
-  cacheOptions = { uri: KEYV_URL };
-}
-
+// Initialize OpenAI
 const openai = new OpenAI({
-  apiKey: OPENAI_ASSISTANT_API_KEY, 
+  apiKey: OPENAI_ASSISTANT_API_KEY,
 });
 
-async function createAssistantThread(conversationId: string, userMessage: string) {
+// Create Assistant
+async function createAssistant() {
   try {
-    const systemMessage = "You are a helpful assistant. Use your tools like the code interpreter, file search, and function calling to assist the user with their requests.";
-    const response = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo', 
-      messages: [
-        { role: 'system', content: systemMessage },
-        { role: 'user', content: userMessage },
-      ],
-      max_tokens: 150,
-      temperature: CHATGPT_TEMPERATURE,
-      user: conversationId,
+    const assistant = await openai.beta.assistants.create({
+      name: "Math Tutor",
+      instructions: "You are a personal math tutor. Write and run code to answer math questions.",
+      tools: [{ type: "code_interpreter" }],
+      model: "gpt-4",
     });
 
-    LogService.info("Thread ID:", conversationId);
-    LogService.info("Assistant's response:", response.choices[0].message.content);
-
-    return response.choices[0].message.content || "Sorry, I couldn't generate a response.";
+    LogService.info("Assistant created:", assistant.id);
+    return assistant;
   } catch (error) {
-    LogService.error("Assistant API", `Error calling Assistant API: ${error.message}`);
-    return "Sorry, there was an error while communicating with the assistant.";
+    LogService.error("Error creating assistant:", error);
+    throw error;
+  }
+}
+
+// Create Thread
+async function createThread() {
+  try {
+    const thread = await openai.beta.threads.create();
+    LogService.info("Thread created:", thread.id);
+    return thread;
+  } catch (error) {
+    LogService.error("Error creating thread:", error);
+    throw error;
+  }
+}
+
+// Add Message to Thread
+async function addMessageToThread(threadId: string, message: string) {
+  try {
+    const messageResponse = await openai.beta.threads.messages.create(threadId, {
+      role: "user",
+      content: message,
+    });
+    LogService.info("Message added to thread:", messageResponse.id);
+    return messageResponse;
+  } catch (error) {
+    LogService.error("Error adding message to thread:", error);
+    throw error;
+  }
+}
+
+// Create and Poll Thread Run
+async function createAndPollThreadRun(threadId: string, assistantId: string) {
+  try {
+    const run = await openai.beta.threads.runs.createAndPoll(threadId, {
+      assistant_id: assistantId,
+      instructions: "Please address the user as Jane Doe. The user has a premium account.",
+    });
+
+    LogService.info("Run completed:", run);
+
+    // Access the assistant's response from the run result (check the actual response structure)
+    const responseText = run.result?.choices?.[0]?.message?.content || "Sorry, I couldn't get a response from the Assistant.";
+    return responseText;
+  } catch (error) {
+    LogService.error("Error running thread:", error);
+    throw error;
   }
 }
 
@@ -77,42 +99,13 @@ async function main() {
 
   if (!MATRIX_THREADS && CHATGPT_CONTEXT !== "room") throw Error("You must set CHATGPT_CONTEXT to 'room' if you set MATRIX_THREADS to false");
 
-  const client: MatrixClient = new MatrixClient(MATRIX_HOMESERVER_URL, MATRIX_ACCESS_TOKEN, storage, cryptoStore);
-
-  const clientOptions = {
-    modelOptions: {
-      model: CHATGPT_API_MODEL,
-      temperature: CHATGPT_TEMPERATURE,
-    },
-    promptPrefix: wrapPrompt(CHATGPT_PROMPT_PREFIX),
-    debug: false,
-    azure: OPENAI_AZURE,
-    reverseProxyUrl: CHATGPT_REVERSE_PROXY,
-    maxContextTokens: CHATGPT_MAX_CONTEXT_TOKENS,
-    maxPromptTokens: CHATGPT_MAX_PROMPT_TOKENS
-  };
+  const client: MatrixClient = new MatrixClient(MATRIX_HOMESERVER_URL, MATRIX_ACCESS_TOKEN);
 
   if (MATRIX_AUTOJOIN) AutojoinRoomsMixin.setupOnClient(client);
 
-  client.on("room.failed_decryption", async (roomId, event, error) => {
-    LogService.error("index", `Failed decryption event!\n${{ roomId, event, error }}`);
-    await client.sendText(roomId, `Room key error. I will leave the room, please reinvite me!`);
-    try {
-      await client.leaveRoom(roomId);
-    } catch (e) {
-      LogService.error("index", `Failed to leave room ${roomId} after failed decryption!`);
-    }
-  });
-
-  client.on("room.join", async (roomId: string, _event: any) => {
-    LogService.info("index", `Bot joined room ${roomId}`);
-    if (MATRIX_WELCOME) {
-      await client.sendMessage(roomId, {
-        "msgtype": "m.notice",
-        "body": `👋 Hello, I'm ChatGPT bot! Matrix E2EE: ${MATRIX_ENCRYPTION}`,
-      });
-    }
-  });
+  // Create Assistant and Thread
+  const assistant = await createAssistant();
+  let thread = await createThread();
 
   client.on("room.message", async (roomId, event) => {
     if (event['content'] && event['content']['msgtype'] === 'm.text') {
@@ -120,48 +113,23 @@ async function main() {
       const sender = event['sender'];
 
       if (sender === MATRIX_BOT_USERNAME) {
-        return; 
+        return;
       }
 
       try {
-        let responseText;
-        let threadId: string | null = null;
+        // Store thread ID in room context (using setRoomData)
+        await client.setRoomData(roomId, 'chatgpt_thread_id', thread.id);
 
-        if (CHATGPT_CONTEXT === 'assistant') {
-          if (!threadId) {
-            threadId = sender;
-            LogService.info("New Thread Created:", threadId);
-          }
+        // Add message to thread
+        await addMessageToThread(thread.id, message);
 
-          LogService.info(`Received message from ${sender}: "${message}"`);
-          responseText = await createAssistantThread(threadId, message);
-        } else {
-          const response = await openai.chat.completions.create({
-            model: CHATGPT_API_MODEL,
-            messages: [
-              { role: 'system', content: 'You are a helpful assistant.' },
-              { role: 'user', content: message },
-            ],
-            temperature: CHATGPT_TEMPERATURE,
-            max_tokens: CHATGPT_MAX_PROMPT_TOKENS,
-          });
+        // Create and poll thread run, then get assistant's response
+        const responseText = await createAndPollThreadRun(thread.id, assistant.id);
 
-          responseText = response.choices[0].message.content;
-        }
-
-        if (!responseText) {
-          LogService.error("index", "Assistant response is not in the expected format or does not contain text.");
-          await client.sendText(roomId, "Sorry, I couldn't get a response from the Assistant.");
-          return;
-        }
-
-        LogService.info(`Assistant's response for thread ${threadId}: "${responseText}"`);
-        await client.sendMessage(roomId, {
-          "msgtype": "m.text",
-          "body": responseText
-        });
+        // Send assistant's response back to the room
+        await client.sendText(roomId, responseText);
       } catch (error) {
-        LogService.error("index", `Error while getting response: ${error}`);
+        LogService.error("Error while handling message:", error);
         await client.sendText(roomId, "Sorry, I couldn't get a response from the Assistant.");
       }
     }
