@@ -40,6 +40,7 @@ export const {
   CHATGPT_TEMPERATURE,
   CHATGPT_MAX_CONTEXT_TOKENS,
   CHATGPT_MAX_PROMPT_TOKENS,
+  OPENAI_ASSISTANT_API_KEY,
 } = parseEnv(process.env, {
   DATA_PATH:                   { schema: z.string().default("./storage"),          description: "Set to /storage/ if using docker, ./storage if running without" },
   KEYV_BACKEND:                { schema: z.enum(["file", "other"]).default("file"),description: "Set the Keyv backend to 'file' or 'other' if other set KEYV_URL" },
@@ -52,7 +53,7 @@ export const {
   MATRIX_BOT_PASSWORD:         { schema: z.string().optional(),                    description: "Set password (superseded by MATRIX_ACCESS_TOKEN if set)" },
   /** Matrix Bot Features */
   MATRIX_AUTOJOIN:             { schema: z.boolean().default(true),                description: "Set to true if you want the bot to autojoin when invited" },
-  MATRIX_ENCRYPTION:           { schema: z.boolean().default(true),                description: "Set to true if you want the bot to support encrypted channels" },
+  MATRIX_ENCRYPTION:           { schema: z.boolean().default(false),                description: "Set to true if you want the bot to support encrypted channels" },
   MATRIX_THREADS:              { schema: z.boolean().default(true),                description: "Set to true if you want the bot to answer always in a new thread/conversation" },
   MATRIX_PREFIX_DM:            { schema: z.boolean().default(false),               description: "Set to false if you want the bot to answer to all messages in a one-to-one room" },
   MATRIX_RICH_TEXT:            { schema: z.boolean().default(true),                description: "Set to true if you want the bot to answer with enriched text" },
@@ -69,12 +70,14 @@ export const {
   OPENAI_AZURE:                { schema: z.boolean().default(false),               description: "Wether or not to use Azure OPENAI"},
   OPENAI_API_KEY:              { schema: z.string().default(""),                   description: "Set to the API key from https://platform.openai.com/account/api-keys"},
   CHATGPT_TIMEOUT:             { schema: z.number().default(2 * 60 * 1000),        description: "Set number of milliseconds to wait for ChatGPT responses" },
-  CHATGPT_CONTEXT:             { schema: z.enum(["thread", "room", "both"]).default("thread"), description: "Set the ChatGPT conversation context to 'thread', 'room' or 'both'" },
+  CHATGPT_CONTEXT:             { schema: z.enum(["thread", "room", "both","assistant"]).default("thread"), description: "Set the ChatGPT conversation context to 'thread', 'room' or 'both'" },
   CHATGPT_API_MODEL:           { schema: z.string().default(""),                   description: "The model for the ChatGPT-API to use. Keep in mind that these models will charge your OpenAI account depending on their pricing." },
   CHATGPT_PROMPT_PREFIX:       { schema: z.string().default('Instructions:\nYou are ChatGPT, a large language model trained by OpenAI.'), description: "Instructions to feed to ChatGPT on startup"},
   CHATGPT_IGNORE_MEDIA:        { schema: z.boolean().default(false),               description: "Wether or not the bot should react to non-text messages"},
   CHATGPT_REVERSE_PROXY:       { schema: z.string().default(""),                   description: "Change the api url to use another (OpenAI-compatible) API endpoint" },
   CHATGPT_TEMPERATURE:         { schema: z.number().default(0.8),                  description: "Set the temperature for the model" },
   CHATGPT_MAX_CONTEXT_TOKENS:  { schema: z.number().default(4097), description: "Davinci models have a max context length of 4097 tokens, but you may need to change this for other models." },
-  CHATGPT_MAX_PROMPT_TOKENS:   { schema: z.number().default(3097), description: "You might want to lower this to save money if using a paid model. Earlier messages will be dropped until the prompt is within the limit." },
+  CHATGPT_MAX_PROMPT_TOKENS:   { schema: z.number().default(2097), description: "You might want to lower this to save money if using a paid model. Earlier messages will be dropped until the prompt is within the limit." },
+  OPENAI_ASSISTANT_API_KEY:    { schema: z.string().default(""),},
 });
+
